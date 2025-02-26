@@ -1,4 +1,4 @@
-# Is UGo Going?
+# Is UGo(ing)?
 
 An automated bot that will soon post daily updates about whether or not the shuttle system at the University of Chicago ("UGo") made most of their scheduled runs or not, more bluntly: is UGo going?
 
