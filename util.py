@@ -44,9 +44,26 @@ def avg_headway(start=None, end=None):
     Special thanks to Andrei Thüler for the base calculation, modified by Dariel Cruz Rodriguez 
     """
     if start is None or end is None:
-        yesterday = date.today() - timedelta(days=1)
-        start = yesterday.strftime("%Y-%m-%d") + " 00:00:00"
-        end = yesterday.strftime("%Y-%m-%d") + " 23:59:59"
+        # Determine yesterday's date in US/Central time
+        central_tz = pytz.timezone('US/Central')
+        now_central = datetime.now(central_tz)
+        yesterday_date = now_central.date() - timedelta(days=1)
+
+        # Create naive datetime objects for the start and end of yesterday in US/Central time
+        start_central_naive = datetime.combine(yesterday_date, time(0, 0, 0))
+        end_central_naive   = datetime.combine(yesterday_date, time(23, 59, 59))
+
+        # Localize these naive times to US/Central to get timezone-aware objects
+        start_central = central_tz.localize(start_central_naive)
+        end_central   = central_tz.localize(end_central_naive)
+
+        # Convert the US/Central times to UTC for use in UTC-based filtering
+        start_utc = start_central.astimezone(pytz.utc)
+        end_utc   = end_central.astimezone(pytz.utc)
+
+        # Format the UTC datetimes as strings if needed
+        start = start_utc.strftime("%Y-%m-%d %H:%M:%S")
+        end = end_utc.strftime("%Y-%m-%d %H:%M:%S")
 
     print(f"Data is pulled between {start} and {end}")
 
@@ -90,6 +107,7 @@ def avg_headway(start=None, end=None):
     # Drop the NaN values, and group average headways by route
     df_stops = df_stops.dropna(subset=['headway'])
     df_stops = df_stops[df_stops['headway'] > 0]
+    df_stops = df_stops[df_stops['headway'] < 240]  # remove outlying 4 hour layovers, suggested by andrei for overnighters
     avg_headways = df_stops.groupby(['routeName','routeId'])['headway'].mean().reset_index()
     return avg_headways
 
