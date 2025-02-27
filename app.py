@@ -2,7 +2,7 @@ from util import *
 from secret import API_KEY, BSKY_PASSWORD, BSKY_USERNAME
 import time
 import pytz
-import datetime
+from datetime import datetime, date, timedelta
 from atproto import Client
 
 client = Client()
@@ -45,7 +45,7 @@ def post(message1: str, message2: str, message3: str):
         print(f"Error: {e}")
         raise
 
-ASAP = False  # Set to True to post immediately, for debugging
+ASAP = True  # Set to True to post immediately, for debugging
 
 def wait_until_post_time():
     tz = pytz.timezone("America/Chicago")

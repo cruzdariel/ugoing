@@ -3,7 +3,7 @@ import json
 import numpy as np
 import pandas as pd
 import requests
-from datetime import date, timedelta
+from datetime import datetime, date, time, timedelta
 import io
 import pytz
 #import passiogo  https://github.com/athuler/PassioGo
@@ -255,7 +255,7 @@ def generate_status_text():
     date_str = yesterday.strftime("%A, %B %d, %Y")
     
     # Determine modifier for the UGoing? sentence: "not" if overall delay is positive
-    delay_modifier = "not" if average_delay > 0 else ""
+    delay_modifier = "Probably not" if average_delay > 0 else "Probably did"
     
     # Create overall delay description text
     if average_delay > 0:
@@ -267,7 +267,7 @@ def generate_status_text():
     
     # Begin constructing the message
     message1 = (
-        f"UGoing? Probably {delay_modifier} yesterday ({date_str}). "
+        f"UGoing? {delay_modifier} yesterday ({date_str}). "
         f"UGo Shuttles overall ran on average {overall_delay_text}."
     )
 
