@@ -2,7 +2,7 @@
 
 An automated bot that posts daily updates about whether or not the shuttle system at the University of Chicago ("UGo") made most of their scheduled runs or not, more bluntly: is UGo going?
 
-[![Follow on BlueSky](https://img.shields.io/badge/-Follow%20@bsky.uchicagoshuttles.comn-blue?logo=Bluesky&logoColor=white)](https://bsky.app/profile/bsky.uchicagoshuttles.com)
+[![Follow on BlueSky](https://img.shields.io/badge/-Follow%20@bsky.uchicagoshuttles.com-blue?logo=Bluesky&logoColor=white)](https://bsky.app/profile/bsky.uchicagoshuttles.com)
 
 ## 🧍‍♂️ Authors
 
