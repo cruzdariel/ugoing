@@ -3,13 +3,7 @@ from secret import API_KEY, BSKY_PASSWORD, BSKY_USERNAME
 import time
 import pytz
 import datetime
-from atproto import Client
-
-client = Client()
-client.login(BSKY_USERNAME, BSKY_PASSWORD)
-
 from atproto import Client, models, client_utils
-from secret import BSKY_USERNAME, BSKY_PASSWORD
 
 client = Client()
 client.login(BSKY_USERNAME, BSKY_PASSWORD)

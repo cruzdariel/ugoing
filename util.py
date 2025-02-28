@@ -65,7 +65,7 @@ def avg_headway(start=None, end=None):
         start = start_utc.strftime("%Y-%m-%d %H:%M:%S")
         end = end_utc.strftime("%Y-%m-%d %H:%M:%S")
 
-    print(f"Data is pulled between {start} and {end}")
+    print(f"Headway data is pulled between {start} and {end}")
 
     # Get the stops data
     url = f"/api/getStops?start={start}&end={end}"
@@ -111,13 +111,37 @@ def avg_headway(start=None, end=None):
     avg_headways = df_stops.groupby(['routeName','routeId'])['headway'].mean().reset_index()
     return avg_headways
 
-def route_averages():
+def route_averages(timetype='day'):
     """
     Returns the difference between average headway and guaranteed headway for each route, based
     on it's pull off stop. For routes with multiple guaranteed headways throughout the day, the
     longest headway is used
     """
-    avg_headways = avg_headway()
+    if timetype == 'day':
+        avg_headways = avg_headway()
+    elif timetype == 'week':
+        central_tz = pytz.timezone('US/Central')
+
+        # Get the current time in US/Central
+        now_central = datetime.now(central_tz)
+
+        # For the end time: use yesterday at 11:59 PM in US/Central
+        yesterday_date = now_central.date() - timedelta(days=1)
+        # Note: 11:59 PM is 23:59 in 24-hour time.
+        end_central_naive = datetime.combine(yesterday_date, time(23, 59, 0))
+        end_central = central_tz.localize(end_central_naive)
+        end_utc = end_central.astimezone(pytz.utc)
+        endtime = end_utc.strftime("%Y-%m-%d %H:%M:%S")
+
+        # For the start time: 7 days ago (from now) at 00:00:00 in US/Central
+        start_date = (now_central - timedelta(days=7)).date()
+        start_central_naive = datetime.combine(start_date, time(0, 0, 0))
+        start_central = central_tz.localize(start_central_naive)
+        start_utc = start_central.astimezone(pytz.utc)
+        starttime = start_utc.strftime("%Y-%m-%d %H:%M:%S")
+
+        avg_headways = avg_headway(start=starttime, end=endtime)
+
     # Daytime routes
     daytime_routes = [48618, 38601, 38728, 38729, 38730, 38731, 38809, 38732, 50198, 50199]
     daytime_routes_names = ['Red Line/Arts Block', '53rd Street Express', 'Apostolic', 'Apostolic/Drexel', 
@@ -178,8 +202,11 @@ def route_averages():
 
     return nightime_score, daytime_score
 
-def call_them_out():
-    nighttime_scores, daytime_scores = route_averages()
+def call_them_out(timetype='day'):
+    if timetype == 'day':
+        nighttime_scores, daytime_scores = route_averages()
+    elif timetype == 'week':
+        nighttime_scores, daytime_scores = route_averages(timetype='week')
 
     total_daytime = 0
     total_nighttime = 0
@@ -231,31 +258,160 @@ def call_them_out():
     
     daytime_ratio = ontime_daytime / total_daytime
     nighttime_ratio = ontime_nighttime / total_nighttime
+    total_ratio = (ontime_daytime + ontime_nighttime) / (total_daytime + total_nighttime)
     average_delay = np.mean(delaynums)
     average_delay_daytime = np.mean(delaynums_daytime)
     average_delay_nighttime = np.mean(delaynums_nighttime)
 
-    return daytime_ratio, nighttime_ratio, delayed_daytime_routes, delayed_nighttime_routes, average_delay, average_delay_daytime, average_delay_nighttime
+    return daytime_ratio, nighttime_ratio, delayed_daytime_routes, delayed_nighttime_routes, average_delay, average_delay_daytime, average_delay_nighttime, total_ratio
 
 #print(call_them_out())
 
-def generate_status_text():
-    """
-    Generates a status message using data from call_them_out().
-    """
-    from datetime import datetime, timedelta
+def get_passengers(timetype='week'):
+    if timetype=='week':
+        # Define the US/Central timezone
+        central_tz = pytz.timezone('US/Central')
 
+        # Get the current time in US/Central
+        now_central = datetime.now(central_tz)
+
+        # For the end time: use yesterday at 11:59 PM in US/Central
+        yesterday_date = now_central.date() - timedelta(days=1)
+        # Note: 11:59 PM is 23:59 in 24-hour time.
+        end_central_naive = datetime.combine(yesterday_date, time(23, 59, 0))
+        end_central = central_tz.localize(end_central_naive)
+        end_utc = end_central.astimezone(pytz.utc)
+        endtime = end_utc.strftime("%Y-%m-%d %H:%M:%S")
+
+        # For the start time: 7 days ago (from now) at 00:00:00 in US/Central
+        start_date = (now_central - timedelta(days=7)).date()
+        start_central_naive = datetime.combine(start_date, time(0, 0, 0))
+        start_central = central_tz.localize(start_central_naive)
+        start_utc = start_central.astimezone(pytz.utc)
+        starttime = start_utc.strftime("%Y-%m-%d %H:%M:%S")
+
+        print(f"Ridership data start time: {starttime}, End time: {endtime}")
+
+        url = f"/api/getRidership?start={starttime}&end={endtime}&aggregate=day"
+        df_total_ridership = getApiData(url, API_KEY)
+
+        dailyridership = {}
+        for day, ridership in zip(df_total_ridership['timeReported'], df_total_ridership['ridership']):
+            day = datetime.strptime(day, "%Y-%m-%d %H:%M").strftime("%A")
+            dailyridership[day] = ridership
+
+        total_ridership = np.sum(df_total_ridership['ridership'])
+        day_mostridership = max(dailyridership, key=dailyridership.get)
+        day_mostridershipval = max(dailyridership.values())
+        day_leastridership = min(dailyridership, key=dailyridership.get)
+        day_leastridershipval = min(dailyridership.values())
+
+        return dailyridership, total_ridership, day_mostridership, day_mostridershipval, day_leastridership, day_leastridershipval
+    elif timetype=='day':
+        # Determine yesterday's date in US/Central time
+        central_tz = pytz.timezone('US/Central')
+        now_central = datetime.now(central_tz)
+        yesterday_date = now_central.date() - timedelta(days=1)
+
+        # Create naive datetime objects for the start and end of yesterday in US/Central time
+        start_central_naive = datetime.combine(yesterday_date, time(0, 0, 0))
+        end_central_naive   = datetime.combine(yesterday_date, time(23, 59, 59))
+
+        # Localize these naive times to US/Central to get timezone-aware objects
+        start_central = central_tz.localize(start_central_naive)
+        end_central   = central_tz.localize(end_central_naive)
+
+        # Convert the US/Central times to UTC for use in UTC-based filtering
+        start_utc = start_central.astimezone(pytz.utc)
+        end_utc   = end_central.astimezone(pytz.utc)
+
+        # Format the UTC datetimes as strings if needed
+        starttime = start_utc.strftime("%Y-%m-%d %H:%M:%S")
+        endtime = end_utc.strftime("%Y-%m-%d %H:%M:%S")
+        print(f"Ridership data start time: {starttime}, End time: {endtime}")
+
+        url = f"/api/getRidership?start={starttime}&end={endtime}&aggregate=hour"
+        df_total_ridership = getApiData(url, API_KEY)
+        total_ridership = np.sum(df_total_ridership['ridership'])
+        hour_mostridershipraw = df_total_ridership.loc[df_total_ridership['ridership'].idxmax()]['timeReported']
+        hour_mostridership = pytz.utc.localize(datetime.strptime(hour_mostridershipraw, "%Y-%m-%d %H:%M")).astimezone(pytz.timezone("America/Chicago")).strftime("%I %p").lstrip("0")
+        hour_mostridershipval = df_total_ridership['ridership'].max()
+        return df_total_ridership, total_ridership, hour_mostridership, hour_mostridershipval
+
+def generate_weekly_report():
+    """
+    Generates a status message using data from call_them_out() for the entire week.
+    """
     # Retrieve metrics from call_them_out()
     (daytime_ratio, nighttime_ratio,
      delayed_daytime_routes, delayed_nighttime_routes,
-     average_delay, average_delay_daytime, average_delay_nighttime) = call_them_out()
+     average_delay, average_delay_daytime, average_delay_nighttime, total_ratio) = call_them_out(timetype='week')
     
+    (dailyridership, total_ridership, day_mostridership, day_mostridershipval, 
+    day_leastridership, day_leastridershipval) = get_passengers(timetype='week')
+
     # Use yesterday's date for the output
     yesterday = datetime.now() - timedelta(days=1)
     date_str = yesterday.strftime("%A, %B %d, %Y")
     
     # Determine modifier for the UGoing? sentence: "not" if overall delay is positive
-    delay_modifier = "Probably not" if average_delay > 0 else "Probably did"
+    delay_modifier = "bad" if average_delay > 5 else "good"
+    
+    # Create overall delay description text
+    if average_delay > 5:
+        overall_delay_text = f"{round(average_delay, 1)} minutes behind guaranteed headways, if they weren't on the {int(total_ratio*100)}% of on-time shuttles"
+    elif average_delay < 0:
+        overall_delay_text = f"{round(abs(average_delay), 1)} minutes ahead of guaranteed headways, if they were on the {int(total_ratio*100)}% of on-time shuttles"
+    else:
+        overall_delay_text = f"roughly on par with guaranteed headways, {int(total_ratio*100)}% of shuttles were on-time time."
+    
+    # Begin constructing the message
+    message1 = (
+        f"🎉 Happy Friday! UGo had a {delay_modifier} week moving Maroons around. (week ending: {date_str}). "
+        f"This week students could expect to wait {overall_delay_text}.\n\nLearn more in the thread ⬇️"
+    )
+
+    message2 = ""
+    message3 = ""
+    
+    # Format daytime information
+    daytime_pct = f"{round(daytime_ratio * 100, 1)}%"
+    message2 += f"☀️ This week, {daytime_pct} of daytime routes ran on time."
+    if delayed_daytime_routes and (average_delay_daytime is not None):
+        routes_str = ", ".join(delayed_daytime_routes)
+        message2 += f" The {routes_str} routes suffered delays averaging {round(average_delay_daytime, 1)} minutes."
+    #message2 += "\n"
+    
+    # Format nighttime information
+    nighttime_pct = f"{round(nighttime_ratio * 100, 1)}%"
+    message3 += f"🌙 This week, {nighttime_pct} of nighttime routes ran on time."
+    if delayed_nighttime_routes and (average_delay_nighttime is not None):
+        routes_str = ", ".join(delayed_nighttime_routes)
+        message3 += f" The {routes_str} routes suffered delays averaging {round(average_delay_nighttime, 1)} minutes."
+    
+    message4 = f"👫 This week, there were {total_ridership} tap-ins on UGo, averaging to about {int(total_ridership/7)} riders/day.\n\nThe busiest day was on {day_mostridership if day_mostridership != 'Friday' else f'last {day_mostridership}'} with {day_mostridershipval} riders.\nThe quietest day was {day_leastridership if day_mostridership != 'Friday' else f'last {day_leastridership}'} with {day_leastridershipval} riders."
+    
+    return message1, message2, message3, message4
+
+
+def generate_status_text():
+    """
+    Generates a status message using data from call_them_out().
+    """
+    # Retrieve metrics from call_them_out()
+    (daytime_ratio, nighttime_ratio,
+     delayed_daytime_routes, delayed_nighttime_routes,
+     average_delay, average_delay_daytime, average_delay_nighttime, total_ratio) = call_them_out()
+    
+    (df_total_ridership, total_ridership, hour_mostridership, 
+    hour_mostridershipval) = get_passengers(timetype='day')
+
+    # Use yesterday's date for the output
+    yesterday = datetime.now() - timedelta(days=1)
+    date_str = yesterday.strftime("%A, %B %d, %Y")
+    
+    # Determine modifier for the UGoing? sentence: "not" if overall delay is positive
+    delay_modifier = "probably didn't" if average_delay > 0 else "probably did"
     
     # Create overall delay description text
     if average_delay > 0:
@@ -267,8 +423,8 @@ def generate_status_text():
     
     # Begin constructing the message
     message1 = (
-        f"UGoing? {delay_modifier} yesterday ({date_str}). "
-        f"UGo Shuttles overall ran on average {overall_delay_text}."
+        f"UGoing? {total_ridership} riders {delay_modifier} yesterday, {date_str}.\n\n"
+        f"UGo Shuttles overall ran on average {overall_delay_text}. Their busiest hour was {hour_mostridership} with {hour_mostridershipval} tap-ins.\n\nLearn more in the thread ⬇️"
     )
 
     message2 = ""
