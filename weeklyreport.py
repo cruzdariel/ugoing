@@ -75,13 +75,21 @@ ASAP = False  # Set to True to post immediately, for debugging
 def wait_until_post_time():
     tz = pytz.timezone("America/Chicago")
     now = datetime.datetime.now(tz)
-    # Set target posting time—for example, 9:00 AM CST
+    # Set target posting time to 9:00 AM CST
     post_time = now.replace(hour=9, minute=0, second=0, microsecond=0)
-    if now >= post_time:
-        # If it's already past 8 AM today, wait until tomorrow
-        post_time += datetime.timedelta(days=1)
+    
+    # Calculate days until next Friday (weekday 4 = Friday)
+    days_until_friday = (4 - now.weekday()) % 7
+    
+    # If it's Friday and already past 9 AM, wait until next Friday
+    if days_until_friday == 0 and now >= post_time:
+        days_until_friday = 7
+    
+    # Adjust post_time to the next Friday
+    post_time += datetime.timedelta(days=days_until_friday)
+    
     sleep_seconds = (post_time - now).total_seconds()
-    print(f"Sleeping for {sleep_seconds/3600:.2f} hours until 9 AM CST")
+    print(f"Sleeping for {sleep_seconds/3600:.2f} hours until Friday 9 AM CST ({post_time.strftime('%Y-%m-%d')})")
     time.sleep(sleep_seconds)
 
 if __name__ == "__main__":
