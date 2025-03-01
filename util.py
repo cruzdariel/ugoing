@@ -415,16 +415,16 @@ def generate_status_text():
     
     # Create overall delay description text
     if average_delay > 0:
-        overall_delay_text = f"{round(average_delay, 1)} minutes behind schedule"
+        overall_delay_text = f"{round(average_delay, 1)} minutes longer than the guaranteed headways."
     elif average_delay < 0:
-        overall_delay_text = f"{round(abs(average_delay), 1)} minutes ahead of schedule"
+        overall_delay_text = f"{round(abs(average_delay), 1)} minutes less than the guaranteed headways."
     else:
-        overall_delay_text = "on schedule"
+        overall_delay_text = "to the guaranteed headways"
     
     # Begin constructing the message
     message1 = (
-        f"UGoing? {total_ridership} riders {delay_modifier} yesterday, {date_str}.\n\n"
-        f"UGo Shuttles overall ran on average {overall_delay_text}. Their busiest hour was {hour_mostridership} with {hour_mostridershipval} tap-ins.\n\nLearn more in the thread ⬇️"
+        f"UGOing? {total_ridership} riders {delay_modifier} yesterday, {date_str}.\n\n"
+        f"UGo Shuttles overall ran on average {overall_delay_text}. Their busiest hour was {hour_mostridership} with {hour_mostridershipval} tap-ins.\n\nLearn more ⬇️"
     )
 
     message2 = ""

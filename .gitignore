@@ -1,3 +1,5 @@
 secret.py
 test.py
 __pycache__/
+session.json
+instagram.py
