@@ -258,7 +258,7 @@ def call_them_out(timetype='day'):
                 ontime_daytime += 1
     
     daytime_ratio = ontime_daytime / total_daytime if total_daytime else 0
-    nighttime_ratio = ontime_nighttime / total_nighttime if total_daytime else 0
+    nighttime_ratio = ontime_nighttime / total_nighttime if total_nighttime else 0
     total_ratio = (ontime_daytime + ontime_nighttime) / (total_daytime + total_nighttime)
     average_delay = np.mean(delaynums) if len(delaynums) > 0 else 0
     average_delay_daytime = np.mean(delaynums_daytime) if len(delaynums_daytime) > 0 else 0
