@@ -4,19 +4,19 @@ import time
 import pytz
 import datetime
 from atproto import Client, models, client_utils
+from atproto_client.models.blob_ref import BlobRef
+from atproto_client.models.app.bsky.embed.images import Main, Image
+import os
 
 client = Client()
 client.login(BSKY_USERNAME, BSKY_PASSWORD)
 
 def post(message1: str, message2: str, message3: str):
     try:
-        # Post the first message (the thread root)
         response1 = client.send_post(message1)
         
-        # Create a strong reference for the first post
         root_ref = models.create_strong_ref(response1)
         
-        # Post the second message as a reply to the first post
         response2 = client.send_post(
             message2,
             reply_to=models.AppBskyFeedPost.ReplyRef(
@@ -25,7 +25,6 @@ def post(message1: str, message2: str, message3: str):
             )
         )
         
-        # Post the third message as a reply to the second post (but still part of the same thread)
         response3 = client.send_post(
             message3,
             reply_to=models.AppBskyFeedPost.ReplyRef(
@@ -33,13 +32,14 @@ def post(message1: str, message2: str, message3: str):
                 root=root_ref
             )
         )
-
+        
         print("Posted successfully!" if response3 else "Failed to post")
     except Exception as e:
         print(f"Error: {e}")
         raise
 
-ASAP = False  # Set to True to post immediately, for debugging
+
+ASAP = False
 
 def wait_until_post_time():
     tz = pytz.timezone("America/Chicago")
@@ -58,12 +58,13 @@ if __name__ == "__main__":
         if not ASAP:
             # Wait until the scheduled posting time, then generate fresh status text
             wait_until_post_time()
-            msg1, msg2, msg3 = generate_status_text()  # This is now called at posting time
+            msg1, msg2, msg3 = generate_status_text() 
             post(msg1, msg2, msg3)
-            # Pause briefly after posting (adjust as needed)
+            # pause briefly after posting
             time.sleep(60)
         else:
             # In ASAP mode, generate status text immediately and post
+            make_photo()
             msg1, msg2, msg3 = generate_status_text()
             post(msg1, msg2, msg3)
             time.sleep(1800)

@@ -6,6 +6,7 @@ import requests
 from datetime import datetime, date, time, timedelta
 import io
 import pytz
+from PIL import Image, ImageDraw, ImageFont
 #import passiogo  https://github.com/athuler/PassioGo
 
 from secret import API_KEY
@@ -156,17 +157,17 @@ def route_averages(timetype='day'):
     
         # Check both route ID and route name
         if route_id == 48618 or route_name == 'Red Line/Arts Block':
-            daytime_score[route_name] = headway - 30
+            daytime_score[route_name] = headway - 20
         elif route_id == 38732 or route_name == '53rd Street Express':
             daytime_score[route_name] = headway - 30
         elif route_id == 38729 or route_name == 'Apostolic':
             daytime_score[route_name] = headway - 30
         elif route_id == 38730 or route_name == 'Apostolic/Drexel':
-            daytime_score[route_name] = headway - 30
-        elif route_id == 38728 or route_name == 'Dresel':
-            daytime_score[route_name] = headway - 30
+            daytime_score[route_name] = headway - 15
+        elif route_id == 38728 or route_name == 'Drexel':
+            daytime_score[route_name] = headway - 10
         elif route_id == 50198 or route_id == 50199 or route_name == 'Downtown Campus Connector':
-            daytime_score[route_name] = headway - 30
+            daytime_score[route_name] = headway - 20
         elif route_id == 38731 or route_id == 38809 or route_name == 'Midway Metra':
             daytime_score[route_name] = headway - 30
         else:
@@ -196,7 +197,7 @@ def route_averages(timetype='day'):
         elif route_id == 40515 or route_name == 'Regents Express':
             nightime_score[route_name] = headway - 30
         elif route_name == 'South Loop Shuttle':
-            nightime_score[route_name] = headway - 30
+            nightime_score[route_name] = headway - 60
         else:
             pass
 
@@ -256,12 +257,12 @@ def call_them_out(timetype='day'):
                 #print(f"{route_name} ran {abs(int(delay))} minutes ahead of schedule on average")
                 ontime_daytime += 1
     
-    daytime_ratio = ontime_daytime / total_daytime
-    nighttime_ratio = ontime_nighttime / total_nighttime
+    daytime_ratio = ontime_daytime / total_daytime if total_daytime else 0
+    nighttime_ratio = ontime_nighttime / total_nighttime if total_daytime else 0
     total_ratio = (ontime_daytime + ontime_nighttime) / (total_daytime + total_nighttime)
-    average_delay = np.mean(delaynums)
-    average_delay_daytime = np.mean(delaynums_daytime)
-    average_delay_nighttime = np.mean(delaynums_nighttime)
+    average_delay = np.mean(delaynums) if len(delaynums) > 0 else 0
+    average_delay_daytime = np.mean(delaynums_daytime) if len(delaynums_daytime) > 0 else 0
+    average_delay_nighttime = np.mean(delaynums_nighttime) if len(delaynums_nighttime) > 0 else 0
 
     return daytime_ratio, nighttime_ratio, delayed_daytime_routes, delayed_nighttime_routes, average_delay, average_delay_daytime, average_delay_nighttime, total_ratio
 
@@ -431,12 +432,14 @@ def generate_status_text():
     message3 = ""
     
     # Format daytime information
-    daytime_pct = f"{round(daytime_ratio * 100, 1)}%"
-    message2 += f"☀️ During the day, {daytime_pct} of daytime routes ran on time."
-    if delayed_daytime_routes and (average_delay_daytime is not None):
-        routes_str = ", ".join(delayed_daytime_routes)
-        message2 += f" The {routes_str} routes suffered delays averaging {round(average_delay_daytime, 1)} minutes."
-    #message2 += "\n"
+    if daytime_ratio == 0:
+        message2 = f"Daytime routes did not run yesterday, {date_str}. Daytime shuttle routes run Monday through Friday"
+    else:
+        daytime_pct = f"{round(daytime_ratio * 100, 1)}%"
+        message2 = f"☀️ During the day, {daytime_pct} of daytime routes ran on time."
+        if delayed_daytime_routes and (average_delay_daytime is not None):
+            routes_str = ", ".join(delayed_daytime_routes)
+            message2 += f" The {routes_str} routes suffered delays averaging {round(average_delay_daytime, 1)} minutes."
     
     # Format nighttime information
     nighttime_pct = f"{round(nighttime_ratio * 100, 1)}%"
@@ -446,5 +449,125 @@ def generate_status_text():
         message3 += f" The {routes_str} routes suffered delays averaging {round(average_delay_nighttime, 1)} minutes."
     
     return message1, message2, message3
+
+def make_photo(img_type="good"):
+    """
+    Takes in the same data thats going into the caption and returns the image to be used in IG post.
+    """
+    (daytime_ratio, nighttime_ratio,
+    delayed_daytime_routes, delayed_nighttime_routes,
+    average_delay, average_delay_daytime, average_delay_nighttime, total_ratio) = call_them_out()
+    
+    (df_total_ridership, total_ridership, hour_mostridership, 
+    hour_mostridershipval) = get_passengers(timetype='day')
+
+    yesterday = datetime.now() - timedelta(days=1)
+    date_str = yesterday.strftime("%A, %B %d, %Y")
+
+    def get_left_aligned_x(anchor_x, text, font):
+        """ Adjusts text position so it expands leftward from the anchor point. """
+        text_bbox = font.getbbox(text)
+        text_width = text_bbox[2] - text_bbox[0]  # Get text width
+        return anchor_x - text_width  # Shift left completely
+
+    if img_type == "good":
+        base_image_path = "images/goodtemplate.png"
+        output_image_path = "images/generated_image.jpg"
+
+        image = Image.open(base_image_path)
+        draw = ImageDraw.Draw(image)
+
+        font_path = "fonts/Gotham-Medium.otf" 
+        font_size = 55
+        font = ImageFont.truetype(font_path, font_size)
+        date_font = ImageFont.truetype(font_path, 65)
+        text_color = (255, 255, 255)
+
+        data_metrics = {
+            "date": str(date_str),
+            "ridership": str(total_ridership),
+            "averageheadway": str(int(abs(average_delay)))
+        }
+
+        # to center the date
+        img_width, img_height = image.size
+        date_text = data_metrics["date"]
+        text_bbox = date_font.getbbox(date_text)
+        text_width = text_bbox[2] - text_bbox[0]
+        centered_x = (img_width - text_width) // 2
+        date_position = (centered_x, 526.3)
+
+        orig_text_positions = {
+            "date": date_position,  # (x, y)
+            "ridership": (238, 715),
+            "averageheadway": (320, 787)
+        }
+
+        ridership_x = get_left_aligned_x(orig_text_positions["ridership"][0], data_metrics["ridership"], font)
+        avg_headway_x = get_left_aligned_x(orig_text_positions["averageheadway"][0], data_metrics["averageheadway"], font)
+
+        text_positions = {
+            "date": date_position,  # (x, y)
+            "ridership": (ridership_x, 715),
+            "averageheadway": (avg_headway_x, 787)
+        }
+
+        for key, text in data_metrics.items():
+            position = text_positions[key]
+            if key == "date":
+                draw.text(position, text, fill=text_color, font=date_font, align="center")
+            else:
+                draw.text(position, text, fill=text_color, font=font, align="center")
+    elif img_type == "bad":
+            base_image_path = "images/badtemplate.png"
+            output_image_path = "images/generated_image.jpg"
+
+            image = Image.open(base_image_path)
+            draw = ImageDraw.Draw(image)
+
+            font_path = "fonts/Gotham-Medium.otf" 
+            font_size = 55
+            font = ImageFont.truetype(font_path, font_size)
+            date_font = ImageFont.truetype(font_path, 65)
+            text_color = (255, 255, 255)
+
+            data_metrics = {
+                "date": str(date_str),
+                "ridership": str(total_ridership),
+                "averageheadway": str(int(abs(average_delay)))
+            }
+
+            # to center the date
+            img_width, img_height = image.size
+            date_text = data_metrics["date"]
+            text_bbox = date_font.getbbox(date_text)
+            text_width = text_bbox[2] - text_bbox[0]
+            centered_x = (img_width - text_width) // 2
+            date_position = (centered_x, 526.3)
+
+            orig_text_positions = {
+                "date": date_position,  # (x, y)
+                "ridership": (248, 715),
+                "averageheadway": (310, 787)
+            }
+
+            ridership_x = get_left_aligned_x(orig_text_positions["ridership"][0], data_metrics["ridership"], font)
+            avg_headway_x = get_left_aligned_x(orig_text_positions["averageheadway"][0], data_metrics["averageheadway"], font)
+
+            text_positions = {
+                "date": date_position,  # (x, y)
+                "ridership": (ridership_x, 715),
+                "averageheadway": (avg_headway_x, 787)
+            }
+
+            for key, text in data_metrics.items():
+                position = text_positions[key]
+                if key == "date":
+                    draw.text(position, text, fill=text_color, font=date_font, align="center")
+                else:
+                    draw.text(position, text, fill=text_color, font=font, align="center")
+    image = image.convert("RGB")
+    image.save(output_image_path)
+    print(f"Image saved as {output_image_path}")
 
 #print(generate_status_text())
