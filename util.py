@@ -7,9 +7,9 @@ from datetime import datetime, date, time, timedelta
 import io
 import pytz
 from PIL import Image, ImageDraw, ImageFont
-#import passiogo  https://github.com/athuler/PassioGo
+import base64
 
-from secret import API_KEY
+from secret import *
 
 BASE_URL = "https://uchicagoshuttles.com"
 
@@ -37,7 +37,6 @@ def utcToCentral(datetime_utc):
     datetime_central = datetime_central.replace(tzinfo=None)
     return datetime_central
 
-    
 def avg_headway(start=None, end=None):
     """
     Returns the average headway for each route between the start and end time
@@ -454,6 +453,8 @@ def make_photo(img_type="good"):
     """
     Takes in the same data thats going into the caption and returns the image to be used in IG post.
     """
+    output_image_path = "images/generated_image.jpg"
+
     (daytime_ratio, nighttime_ratio,
     delayed_daytime_routes, delayed_nighttime_routes,
     average_delay, average_delay_daytime, average_delay_nighttime, total_ratio) = call_them_out()
@@ -472,7 +473,6 @@ def make_photo(img_type="good"):
 
     if img_type == "good":
         base_image_path = "images/goodtemplate.png"
-        output_image_path = "images/generated_image.jpg"
 
         image = Image.open(base_image_path)
         draw = ImageDraw.Draw(image)
@@ -520,7 +520,6 @@ def make_photo(img_type="good"):
                 draw.text(position, text, fill=text_color, font=font, align="center")
     elif img_type == "bad":
             base_image_path = "images/badtemplate.png"
-            output_image_path = "images/generated_image.jpg"
 
             image = Image.open(base_image_path)
             draw = ImageDraw.Draw(image)
@@ -566,8 +565,22 @@ def make_photo(img_type="good"):
                     draw.text(position, text, fill=text_color, font=date_font, align="center")
                 else:
                     draw.text(position, text, fill=text_color, font=font, align="center")
+    
+    # save image locally
     image = image.convert("RGB")
     image.save(output_image_path)
     print(f"Image saved as {output_image_path}")
 
-#print(generate_status_text())
+    # upload image online
+    url = "https://api.imgur.com/3/image"
+    headers = {"Authorization": f"Client-ID {IMGUR_CLIENT_ID}"}
+
+    with open(output_image_path, "rb") as file:
+        data = file.read()
+        base64_data = base64.b64encode(data)
+    
+    response = requests.post(url, headers=headers, data={"image": base64_data})
+    imgurl = response.json()["data"]["link"]
+    print(f"Image uploaded at {imgurl}")
+
+    return imgurl

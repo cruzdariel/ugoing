@@ -4,8 +4,6 @@ import time
 import pytz
 import datetime
 from atproto import Client, models, client_utils
-from atproto_client.models.blob_ref import BlobRef
-from atproto_client.models.app.bsky.embed.images import Main, Image
 import os
 
 client = Client()
