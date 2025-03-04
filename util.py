@@ -338,6 +338,142 @@ def get_passengers(timetype='week'):
         hour_mostridershipval = df_total_ridership['ridership'].max()
         return df_total_ridership, total_ridership, hour_mostridership, hour_mostridershipval
 
+def make_photo(img_type, riders, delay):
+    """
+    Takes in the same data thats going into the caption and returns the image to be used in IG post.
+    """
+    output_image_path = "images/generated_image.jpg"
+
+    #(daytime_ratio, nighttime_ratio,
+    #delayed_daytime_routes, delayed_nighttime_routes,
+    #average_delay, average_delay_daytime, average_delay_nighttime, total_ratio) = call_them_out()
+    
+    #(df_total_ridership, total_ridership, hour_mostridership, 
+    #hour_mostridershipval) = get_passengers(timetype='day')
+
+    yesterday = datetime.now() - timedelta(days=1)
+    date_str = yesterday.strftime("%A, %B %d, %Y")
+
+    def get_left_aligned_x(anchor_x, text, font):
+        """ Adjusts text position so it expands leftward from the anchor point. """
+        text_bbox = font.getbbox(text)
+        text_width = text_bbox[2] - text_bbox[0]  # Get text width
+        return anchor_x - text_width  # Shift left completely
+
+    if img_type == "good":
+        base_image_path = "images/goodtemplate.png"
+
+        image = Image.open(base_image_path)
+        draw = ImageDraw.Draw(image)
+
+        font_path = "fonts/Gotham-Medium.otf" 
+        font_size = 55
+        font = ImageFont.truetype(font_path, font_size)
+        date_font = ImageFont.truetype(font_path, 65)
+        text_color = (255, 255, 255)
+
+        data_metrics = {
+            "date": str(date_str),
+            "ridership": str(riders),
+            "averageheadway": str(round(abs(delay), 1))
+        }
+
+        # to center the date
+        img_width, img_height = image.size
+        date_text = data_metrics["date"]
+        text_bbox = date_font.getbbox(date_text)
+        text_width = text_bbox[2] - text_bbox[0]
+        centered_x = (img_width - text_width) // 2
+        date_position = (centered_x, 526.3)
+
+        orig_text_positions = {
+            "date": date_position,  # (x, y)
+            "ridership": (238, 715),
+            "averageheadway": (320, 787)
+        }
+
+        ridership_x = get_left_aligned_x(orig_text_positions["ridership"][0], data_metrics["ridership"], font)
+        avg_headway_x = get_left_aligned_x(orig_text_positions["averageheadway"][0], data_metrics["averageheadway"], font)
+
+        text_positions = {
+            "date": date_position,  # (x, y)
+            "ridership": (ridership_x, 715),
+            "averageheadway": (avg_headway_x, 787)
+        }
+
+        for key, text in data_metrics.items():
+            position = text_positions[key]
+            if key == "date":
+                draw.text(position, text, fill=text_color, font=date_font, align="center")
+            else:
+                draw.text(position, text, fill=text_color, font=font, align="center")
+    elif img_type == "bad":
+            base_image_path = "images/badtemplate.png"
+
+            image = Image.open(base_image_path)
+            draw = ImageDraw.Draw(image)
+
+            font_path = "fonts/Gotham-Medium.otf" 
+            font_size = 55
+            font = ImageFont.truetype(font_path, font_size)
+            date_font = ImageFont.truetype(font_path, 65)
+            text_color = (255, 255, 255)
+
+            data_metrics = {
+                "date": str(date_str),
+                "ridership": str(riders),
+                "averageheadway": str(round(abs(delay), 1))
+            }
+
+            # to center the date
+            img_width, img_height = image.size
+            date_text = data_metrics["date"]
+            text_bbox = date_font.getbbox(date_text)
+            text_width = text_bbox[2] - text_bbox[0]
+            centered_x = (img_width - text_width) // 2
+            date_position = (centered_x, 526.3)
+
+            orig_text_positions = {
+                "date": date_position,  # (x, y)
+                "ridership": (248, 715),
+                "averageheadway": (310, 787)
+            }
+
+            ridership_x = get_left_aligned_x(orig_text_positions["ridership"][0], data_metrics["ridership"], font)
+            avg_headway_x = get_left_aligned_x(orig_text_positions["averageheadway"][0], data_metrics["averageheadway"], font)
+
+            text_positions = {
+                "date": date_position,  # (x, y)
+                "ridership": (ridership_x, 715),
+                "averageheadway": (avg_headway_x, 787)
+            }
+
+            for key, text in data_metrics.items():
+                position = text_positions[key]
+                if key == "date":
+                    draw.text(position, text, fill=text_color, font=date_font, align="center")
+                else:
+                    draw.text(position, text, fill=text_color, font=font, align="center")
+    
+    # save image locally
+    image = image.convert("RGB")
+    image.save(output_image_path)
+    print(f"Image saved as {output_image_path}")
+
+    # upload image online
+    url = "https://api.imgur.com/3/image"
+    headers = {"Authorization": f"Client-ID {IMGUR_CLIENT_ID}"}
+
+    with open(output_image_path, "rb") as file:
+        data = file.read()
+        base64_data = base64.b64encode(data)
+    
+    response = requests.post(url, headers=headers, data={"image": base64_data})
+    imgurl = response.json()["data"]["link"]
+    print(f"Image uploaded at {imgurl}")
+
+    return imgurl
+
 def generate_weekly_report():
     """
     Generates a status message using data from call_them_out() for the entire week.
@@ -416,10 +552,13 @@ def generate_status_text():
     # Create overall delay description text
     if average_delay > 0:
         overall_delay_text = f"{round(average_delay, 1)} minutes longer than the guaranteed headways."
+        imgurl = make_photo(img_type="bad", riders=total_ridership, delay=average_delay)
     elif average_delay < 0:
         overall_delay_text = f"{round(abs(average_delay), 1)} minutes less than the guaranteed headways."
+        imgurl = make_photo(img_type="good", riders=total_ridership, delay=average_delay)
     else:
         overall_delay_text = "to the guaranteed headways"
+        imgurl = make_photo(img_type="good", riders=total_ridership, delay=average_delay)
     
     # Begin constructing the message
     message1 = (
@@ -447,140 +586,4 @@ def generate_status_text():
         routes_str = ", ".join(delayed_nighttime_routes)
         message3 += f" The {routes_str} routes suffered delays averaging {round(average_delay_nighttime, 1)} minutes."
     
-    return message1, message2, message3
-
-def make_photo(img_type="good"):
-    """
-    Takes in the same data thats going into the caption and returns the image to be used in IG post.
-    """
-    output_image_path = "images/generated_image.jpg"
-
-    (daytime_ratio, nighttime_ratio,
-    delayed_daytime_routes, delayed_nighttime_routes,
-    average_delay, average_delay_daytime, average_delay_nighttime, total_ratio) = call_them_out()
-    
-    (df_total_ridership, total_ridership, hour_mostridership, 
-    hour_mostridershipval) = get_passengers(timetype='day')
-
-    yesterday = datetime.now() - timedelta(days=1)
-    date_str = yesterday.strftime("%A, %B %d, %Y")
-
-    def get_left_aligned_x(anchor_x, text, font):
-        """ Adjusts text position so it expands leftward from the anchor point. """
-        text_bbox = font.getbbox(text)
-        text_width = text_bbox[2] - text_bbox[0]  # Get text width
-        return anchor_x - text_width  # Shift left completely
-
-    if img_type == "good":
-        base_image_path = "images/goodtemplate.png"
-
-        image = Image.open(base_image_path)
-        draw = ImageDraw.Draw(image)
-
-        font_path = "fonts/Gotham-Medium.otf" 
-        font_size = 55
-        font = ImageFont.truetype(font_path, font_size)
-        date_font = ImageFont.truetype(font_path, 65)
-        text_color = (255, 255, 255)
-
-        data_metrics = {
-            "date": str(date_str),
-            "ridership": str(total_ridership),
-            "averageheadway": str(int(abs(average_delay)))
-        }
-
-        # to center the date
-        img_width, img_height = image.size
-        date_text = data_metrics["date"]
-        text_bbox = date_font.getbbox(date_text)
-        text_width = text_bbox[2] - text_bbox[0]
-        centered_x = (img_width - text_width) // 2
-        date_position = (centered_x, 526.3)
-
-        orig_text_positions = {
-            "date": date_position,  # (x, y)
-            "ridership": (238, 715),
-            "averageheadway": (320, 787)
-        }
-
-        ridership_x = get_left_aligned_x(orig_text_positions["ridership"][0], data_metrics["ridership"], font)
-        avg_headway_x = get_left_aligned_x(orig_text_positions["averageheadway"][0], data_metrics["averageheadway"], font)
-
-        text_positions = {
-            "date": date_position,  # (x, y)
-            "ridership": (ridership_x, 715),
-            "averageheadway": (avg_headway_x, 787)
-        }
-
-        for key, text in data_metrics.items():
-            position = text_positions[key]
-            if key == "date":
-                draw.text(position, text, fill=text_color, font=date_font, align="center")
-            else:
-                draw.text(position, text, fill=text_color, font=font, align="center")
-    elif img_type == "bad":
-            base_image_path = "images/badtemplate.png"
-
-            image = Image.open(base_image_path)
-            draw = ImageDraw.Draw(image)
-
-            font_path = "fonts/Gotham-Medium.otf" 
-            font_size = 55
-            font = ImageFont.truetype(font_path, font_size)
-            date_font = ImageFont.truetype(font_path, 65)
-            text_color = (255, 255, 255)
-
-            data_metrics = {
-                "date": str(date_str),
-                "ridership": str(total_ridership),
-                "averageheadway": str(int(abs(average_delay)))
-            }
-
-            # to center the date
-            img_width, img_height = image.size
-            date_text = data_metrics["date"]
-            text_bbox = date_font.getbbox(date_text)
-            text_width = text_bbox[2] - text_bbox[0]
-            centered_x = (img_width - text_width) // 2
-            date_position = (centered_x, 526.3)
-
-            orig_text_positions = {
-                "date": date_position,  # (x, y)
-                "ridership": (248, 715),
-                "averageheadway": (310, 787)
-            }
-
-            ridership_x = get_left_aligned_x(orig_text_positions["ridership"][0], data_metrics["ridership"], font)
-            avg_headway_x = get_left_aligned_x(orig_text_positions["averageheadway"][0], data_metrics["averageheadway"], font)
-
-            text_positions = {
-                "date": date_position,  # (x, y)
-                "ridership": (ridership_x, 715),
-                "averageheadway": (avg_headway_x, 787)
-            }
-
-            for key, text in data_metrics.items():
-                position = text_positions[key]
-                if key == "date":
-                    draw.text(position, text, fill=text_color, font=date_font, align="center")
-                else:
-                    draw.text(position, text, fill=text_color, font=font, align="center")
-    
-    # save image locally
-    image = image.convert("RGB")
-    image.save(output_image_path)
-    print(f"Image saved as {output_image_path}")
-
-    # upload image online
-    url = "https://api.imgur.com/3/image"
-    headers = {"Authorization": f"Client-ID {IMGUR_CLIENT_ID}"}
-
-    with open(output_image_path, "rb") as file:
-        data = file.read()
-        base64_data = base64.b64encode(data)
-    
-    response = requests.post(url, headers=headers, data={"image": base64_data})
-    imgurl = response.json()["data"]["link"]
-    print(f"Image uploaded at {imgurl}")
-
-    return imgurl
+    return message1, message2, message3, imgurl

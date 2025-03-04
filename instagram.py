@@ -45,7 +45,7 @@ def ig_post(image_url, caption):
     else:
         print(f"Upload failed: {response.json()}")
 
-ASAP = False
+ASAP = True
 
 def wait_until_post_time():
     tz = pytz.timezone("America/Chicago")
@@ -64,17 +64,16 @@ if __name__ == "__main__":
         if not ASAP:
             # Wait until the scheduled posting time, then generate fresh status text
             wait_until_post_time()
-            msg1, msg2, msg3 = generate_status_text()
+            msg1, msg2, msg3, imgurl = generate_status_text()
             msg4 = "To access shuttle data, visit the link in our bio. This is an automated message, coded by Dariel Cruz Rodriguez using data from Andrei Thüler's UChicago Shuttles API."
             caption = "\n\n".join([msg1, msg2, msg3, msg4])
-            ig_post(make_photo(), caption)
+            ig_post(imgurl, caption)
             # pause briefly after posting
             time.sleep(60)
         else:
             # In ASAP mode, generate status text immediately and post
-            make_photo()
-            msg1, msg2, msg3 = generate_status_text()
+            msg1, msg2, msg3, imgurl = generate_status_text()
             msg4 = "To access shuttle data, visit the link in our bio. This is an automated message, coded by Dariel Cruz Rodriguez using data from Andrei Thüler's UChicago Shuttles API."
             caption = "\n\n".join([msg1, msg2, msg3, msg4])
-            ig_post(make_photo(), caption)
+            ig_post(imgurl, caption)
             time.sleep(1800)
