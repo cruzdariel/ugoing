@@ -1,4 +1,3 @@
-import datetime
 import json
 import numpy as np
 import pandas as pd
@@ -8,9 +7,14 @@ import io
 import pytz
 from PIL import Image, ImageDraw, ImageFont
 import base64
+from atproto import Client, models
+import time as time_module
+import os
+from dotenv import load_dotenv
+load_dotenv()
 
-from secret import *
-
+API_KEY = os.getenv("API_KEY")
+IMGUR_CLIENT_ID = os.getenv("IMGUR_CLIENT_ID")
 BASE_URL = "https://uchicagoshuttles.com"
 
 def getApiData(url, key):
@@ -37,39 +41,15 @@ def utcToCentral(datetime_utc):
     datetime_central = datetime_central.replace(tzinfo=None)
     return datetime_central
 
-def avg_headway(start=None, end=None):
+def get_headways(data, start=None, end=None):
     """
     Returns the average headway for each route between the start and end time
 
     Special thanks to Andrei Thüler for the base calculation, modified by Dariel Cruz Rodriguez 
     """
-    if start is None or end is None:
-        # Determine yesterday's date in US/Central time
-        central_tz = pytz.timezone('US/Central')
-        now_central = datetime.now(central_tz)
-        yesterday_date = now_central.date() - timedelta(days=1)
-
-        # Create naive datetime objects for the start and end of yesterday in US/Central time
-        start_central_naive = datetime.combine(yesterday_date, time(0, 0, 0))
-        end_central_naive   = datetime.combine(yesterday_date, time(23, 59, 59))
-
-        # Localize these naive times to US/Central to get timezone-aware objects
-        start_central = central_tz.localize(start_central_naive)
-        end_central   = central_tz.localize(end_central_naive)
-
-        # Convert the US/Central times to UTC for use in UTC-based filtering
-        start_utc = start_central.astimezone(pytz.utc)
-        end_utc   = end_central.astimezone(pytz.utc)
-
-        # Format the UTC datetimes as strings if needed
-        start = start_utc.strftime("%Y-%m-%d %H:%M:%S")
-        end = end_utc.strftime("%Y-%m-%d %H:%M:%S")
-
-    print(f"Headway data is pulled between {start} and {end}")
-
+    
     # Get the stops data
-    url = f"/api/getStops?start={start}&end={end}"
-    df_stops = getApiData(url, API_KEY)
+    df_stops = data
 
     # Convert the times to datetime objects
     df_stops["arrivalTime"] = pd.to_datetime(df_stops["arrivalTime"])
@@ -104,357 +84,142 @@ def avg_headway(start=None, end=None):
         
         current_id += 1
     
-    # Drop the NaN values, and group average headways by route
+    # Drop the NaN values and add a column about whether it is below or above promised headways +- 2 minutes
     df_stops = df_stops.dropna(subset=['headway'])
     df_stops = df_stops[df_stops['headway'] > 0]
     df_stops = df_stops[df_stops['headway'] < 240]  # remove outlying 4 hour layovers, suggested by andrei for overnighters
-    avg_headways = df_stops.groupby(['routeName','routeId'])['headway'].mean().reset_index()
-    return avg_headways
-
-def route_averages(timetype='day'):
-    """
-    Returns the difference between average headway and guaranteed headway for each route, based
-    on it's pull off stop. For routes with multiple guaranteed headways throughout the day, the
-    longest headway is used
-    """
-    if timetype == 'day':
-        avg_headways = avg_headway()
-    elif timetype == 'week':
-        central_tz = pytz.timezone('US/Central')
-
-        # Get the current time in US/Central
-        now_central = datetime.now(central_tz)
-
-        # For the end time: use yesterday at 11:59 PM in US/Central
-        yesterday_date = now_central.date() - timedelta(days=1)
-        # Note: 11:59 PM is 23:59 in 24-hour time.
-        end_central_naive = datetime.combine(yesterday_date, time(23, 59, 0))
-        end_central = central_tz.localize(end_central_naive)
-        end_utc = end_central.astimezone(pytz.utc)
-        endtime = end_utc.strftime("%Y-%m-%d %H:%M:%S")
-
-        # For the start time: 7 days ago (from now) at 00:00:00 in US/Central
-        start_date = (now_central - timedelta(days=7)).date()
-        start_central_naive = datetime.combine(start_date, time(0, 0, 0))
-        start_central = central_tz.localize(start_central_naive)
-        start_utc = start_central.astimezone(pytz.utc)
-        starttime = start_utc.strftime("%Y-%m-%d %H:%M:%S")
-
-        avg_headways = avg_headway(start=starttime, end=endtime)
-
-    # Daytime routes
-    daytime_routes = [48618, 38601, 38728, 38729, 38730, 38731, 38809, 38732, 50198, 50199]
-    daytime_routes_names = ['Red Line/Arts Block', '53rd Street Express', 'Apostolic', 'Apostolic/Drexel', 
-                            'Drexel', 'Downtown Campus Connector', 'Midway Metra'] # this is not used, but a redundancy
-    daytime_hw = avg_headways[avg_headways['routeId'].isin(daytime_routes)]
-    daytime_score = {}
-
-    for _, row in daytime_hw.iterrows():
-        route_id = row['routeId']
-        route_name = row['routeName']
-        headway = row['headway']
     
-        # Check both route ID and route name
-        if route_id == 48618 or route_name == 'Red Line/Arts Block':
-            daytime_score[route_name] = headway - 20
-        elif route_id == 38732 or route_name == '53rd Street Express':
-            daytime_score[route_name] = headway - 30
-        elif route_id == 38729 or route_name == 'Apostolic':
-            daytime_score[route_name] = headway - 30
-        elif route_id == 38730 or route_name == 'Apostolic/Drexel':
-            daytime_score[route_name] = headway - 15
-        elif route_id == 38728 or route_name == 'Drexel':
-            daytime_score[route_name] = headway - 10
-        elif route_id == 50198 or route_id == 50199 or route_name == 'Downtown Campus Connector':
-            daytime_score[route_name] = headway - 20
-        elif route_id == 38731 or route_id == 38809 or route_name == 'Midway Metra':
-            daytime_score[route_name] = headway - 30
-        else:
-            pass
-
-    # Nighttime routes
-    nighttime_routes = [38734, 38735, 38736, 38737, 40515]
-    nighttime_routes_names = ['North', 'South', 'East', 'Central', 'Regents Express', 'South Loop Shuttle']
-    nighttime_hw = avg_headways[avg_headways['routeId'].isin(nighttime_routes) | 
-                              avg_headways['routeName'].isin(nighttime_routes_names)]
-    nightime_score = {}
-
-    for _, row in nighttime_hw.iterrows():
+    def get_promised_headway(row):
         route_id = row['routeId']
         route_name = row['routeName']
-        headway = row['headway']
         
-        # Check both route ID and route name
-        if route_id == 38734 or route_name == 'North':
-            nightime_score[route_name] = headway - 30
+        # Daytime routes
+        if route_id == 48618 or route_name == 'Red Line/Arts Block':
+            return 20
+        elif route_id == 38732 or route_name == '53rd Street Express':
+            return 30
+        elif route_id == 38729 or route_name == 'Apostolic':
+            return 30
+        elif route_id == 38730 or route_name == 'Apostolic/Drexel':
+            return 15
+        elif route_id == 38728 or route_name == 'Drexel':
+            return 10
+        elif route_id == 50198 or route_id == 50199 or route_name == 'Downtown Campus Connector':
+            return 20
+        elif route_id == 38731 or route_id == 38809 or route_name == 'Midway Metra':
+            return 30
+        elif route_name == 'Friend Center/Metra':
+            return 30
+
+        # Nighttime routes
+        elif route_id == 38734 or route_name == 'North':
+            return 30
         elif route_id == 38735 or route_name == 'South':
-            nightime_score[route_name] = headway - 30
+            return 30
         elif route_id == 38736 or route_name == 'East':
-            nightime_score[route_name] = headway - 30
+            return 30
         elif route_id == 38737 or route_name == 'Central':
-            nightime_score[route_name] = headway - 30
+            return 30
         elif route_id == 40515 or route_name == 'Regents Express':
-            nightime_score[route_name] = headway - 30
+            return 30
         elif route_name == 'South Loop Shuttle':
-            nightime_score[route_name] = headway - 60
+            return 60
         else:
-            pass
+            return np.nan
 
-    return nightime_score, daytime_score
-
-def call_them_out(timetype='day'):
-    if timetype == 'day':
-        nighttime_scores, daytime_scores = route_averages()
-    elif timetype == 'week':
-        nighttime_scores, daytime_scores = route_averages(timetype='week')
-
-    total_daytime = 0
-    total_nighttime = 0
-    ontime_daytime = 0
-    ontime_nighttime = 0
-    delayed_daytime = 0
-    delayed_nighttime = 0
-    delayed_daytime_routes = []
-    delayed_nighttime_routes = []
-    delaynums = []
-    delaynums_daytime = []
-    delaynums_nighttime = []
-
-    if nighttime_scores == {}:
-        print('All routes are on time')
-    else:
-        for route_name, delay in nighttime_scores.items():
-            total_nighttime += 1
-            delaynums.append(delay)
-            if delay > 0:
-                #print(f"{route_name} ran {int(delay)} minutes behind schedule on average")
-                delayed_nighttime += 1
-                delayed_nighttime_routes.append(route_name)
-                delaynums_nighttime.append(delay)
-            elif delay == 0:
-                #print(f"{route_name} ran on time")
-                ontime_nighttime += 1
-            elif delay < 0: 
-                #print(f"{route_name} ran {abs(int(delay))} minutes ahead of schedule on average")
-                ontime_nighttime += 1
+    # Records whether that specific run met the promised headway
+    df_stops["promised_headway"] = df_stops.apply(get_promised_headway, axis=1)
+    df_stops["meetPromisedHeadway"] = df_stops.apply(
+        lambda row: abs(row["headway"] - row["promised_headway"]) <= 5 if pd.notnull(row["promised_headway"]) else False,
+        axis=1
+    )
     
-    if daytime_scores == {}:
-        print('All routes are on time')
-    else:
-        for route_name, delay in daytime_scores.items():
-            total_daytime +=1
-            delaynums.append(delay)
-            if delay > 0:
-                #print(f"{route_name} ran {int(delay)} minutes behind schedule on average")
-                delayed_daytime += 1
-                delayed_daytime_routes.append(route_name)
-                delaynums_daytime.append(delay)
-            elif delay == 0:
-                #print(f"{route_name} ran on time")
-                ontime_daytime += 1
-            elif delay < 0: 
-                #print(f"{route_name} ran {abs(int(delay))} minutes ahead of schedule on average")
-                ontime_daytime += 1
-    
-    daytime_ratio = ontime_daytime / total_daytime if total_daytime else 0
-    nighttime_ratio = ontime_nighttime / total_nighttime if total_nighttime else 0
-    total_ratio = (ontime_daytime + ontime_nighttime) / (total_daytime + total_nighttime)
-    average_delay = np.mean(delaynums) if len(delaynums) > 0 else 0
-    average_delay_daytime = np.mean(delaynums_daytime) if len(delaynums_daytime) > 0 else 0
-    average_delay_nighttime = np.mean(delaynums_nighttime) if len(delaynums_nighttime) > 0 else 0
+    # Other data cleaning (dropping irrelevant columns)
+    df_stops = df_stops.drop(columns=["id","stopDurationSeconds", "arrivalTime", "departureTime","nextStopId"])
+    return df_stops
 
-    return daytime_ratio, nighttime_ratio, delayed_daytime_routes, delayed_nighttime_routes, average_delay, average_delay_daytime, average_delay_nighttime, total_ratio
 
-#print(call_them_out())
+def route_performance(data):
+    """
+    Calculate route performance by evaluating how well each route adheres to its promised headway.
+    """
+    headways = get_headways(data)
+    aggregated = headways.groupby(['routeName','routeId'])['meetPromisedHeadway'].agg(total_true='sum', total_count='count').reset_index()
+    aggregated['total_false'] = aggregated['total_count'] - aggregated['total_true']
+    aggregated['total'] = aggregated['total_true'] + aggregated['total_false']
+    return aggregated[['routeName', 'routeId', 'total_true', 'total_false', 'total']]
 
-def get_passengers(timetype='week'):
-    if timetype=='week':
-        # Define the US/Central timezone
-        central_tz = pytz.timezone('US/Central')
+def get_ridership(data):
+    ridership = get_headways(data) 
+    return ridership['passengerLoad'].sum()
 
-        # Get the current time in US/Central
-        now_central = datetime.now(central_tz)
-
-        # For the end time: use yesterday at 11:59 PM in US/Central
-        yesterday_date = now_central.date() - timedelta(days=1)
-        # Note: 11:59 PM is 23:59 in 24-hour time.
-        end_central_naive = datetime.combine(yesterday_date, time(23, 59, 0))
-        end_central = central_tz.localize(end_central_naive)
-        end_utc = end_central.astimezone(pytz.utc)
-        endtime = end_utc.strftime("%Y-%m-%d %H:%M:%S")
-
-        # For the start time: 7 days ago (from now) at 00:00:00 in US/Central
-        start_date = (now_central - timedelta(days=7)).date()
-        start_central_naive = datetime.combine(start_date, time(0, 0, 0))
-        start_central = central_tz.localize(start_central_naive)
-        start_utc = start_central.astimezone(pytz.utc)
-        starttime = start_utc.strftime("%Y-%m-%d %H:%M:%S")
-
-        print(f"Ridership data start time: {starttime}, End time: {endtime}")
-
-        url = f"/api/getRidership?start={starttime}&end={endtime}&aggregate=day"
-        df_total_ridership = getApiData(url, API_KEY)
-
-        dailyridership = {}
-        for day, ridership in zip(df_total_ridership['timeReported'], df_total_ridership['ridership']):
-            day = datetime.strptime(day, "%Y-%m-%d %H:%M").strftime("%A")
-            dailyridership[day] = ridership
-
-        total_ridership = np.sum(df_total_ridership['ridership'])
-        day_mostridership = max(dailyridership, key=dailyridership.get)
-        day_mostridershipval = max(dailyridership.values())
-        day_leastridership = min(dailyridership, key=dailyridership.get)
-        day_leastridershipval = min(dailyridership.values())
-
-        return dailyridership, total_ridership, day_mostridership, day_mostridershipval, day_leastridership, day_leastridershipval
-    elif timetype=='day':
-        # Determine yesterday's date in US/Central time
-        central_tz = pytz.timezone('US/Central')
-        now_central = datetime.now(central_tz)
-        yesterday_date = now_central.date() - timedelta(days=1)
-
-        # Create naive datetime objects for the start and end of yesterday in US/Central time
-        start_central_naive = datetime.combine(yesterday_date, time(0, 0, 0))
-        end_central_naive   = datetime.combine(yesterday_date, time(23, 59, 59))
-
-        # Localize these naive times to US/Central to get timezone-aware objects
-        start_central = central_tz.localize(start_central_naive)
-        end_central   = central_tz.localize(end_central_naive)
-
-        # Convert the US/Central times to UTC for use in UTC-based filtering
-        start_utc = start_central.astimezone(pytz.utc)
-        end_utc   = end_central.astimezone(pytz.utc)
-
-        # Format the UTC datetimes as strings if needed
-        starttime = start_utc.strftime("%Y-%m-%d %H:%M:%S")
-        endtime = end_utc.strftime("%Y-%m-%d %H:%M:%S")
-        print(f"Ridership data start time: {starttime}, End time: {endtime}")
-
-        url = f"/api/getRidership?start={starttime}&end={endtime}&aggregate=hour"
-        df_total_ridership = getApiData(url, API_KEY)
-        total_ridership = np.sum(df_total_ridership['ridership'])
-        hour_mostridershipraw = df_total_ridership.loc[df_total_ridership['ridership'].idxmax()]['timeReported']
-        hour_mostridership = pytz.utc.localize(datetime.strptime(hour_mostridershipraw, "%Y-%m-%d %H:%M")).astimezone(pytz.timezone("America/Chicago")).strftime("%I %p").lstrip("0")
-        hour_mostridershipval = df_total_ridership['ridership'].max()
-        return df_total_ridership, total_ridership, hour_mostridership, hour_mostridershipval
-
-def make_photo(img_type, riders, delay):
+def make_photo(data, img_type="neutral"):
     """
     Takes in the same data thats going into the caption and returns the image to be used in IG post.
     """
     output_image_path = "images/generated_image.jpg"
-
-    #(daytime_ratio, nighttime_ratio,
-    #delayed_daytime_routes, delayed_nighttime_routes,
-    #average_delay, average_delay_daytime, average_delay_nighttime, total_ratio) = call_them_out()
-    
-    #(df_total_ridership, total_ridership, hour_mostridership, 
-    #hour_mostridershipval) = get_passengers(timetype='day')
-
     yesterday = datetime.now() - timedelta(days=1)
     date_str = yesterday.strftime("%A, %B %d, %Y")
+    riders = get_ridership(data)
 
-    def get_left_aligned_x(anchor_x, text, font):
-        """ Adjusts text position so it expands leftward from the anchor point. """
-        text_bbox = font.getbbox(text)
-        text_width = text_bbox[2] - text_bbox[0]  # Get text width
-        return anchor_x - text_width  # Shift left completely
+    if img_type in ["neutral", "good", "bad"]:
+        base_image_path = f"images/{img_type}template.png"
+    else:
+        base_image_path = f"images/neutraltemplate.png"
 
-    if img_type == "good":
-        base_image_path = "images/goodtemplate.png"
+    image = Image.open(base_image_path)
+    draw = ImageDraw.Draw(image)
 
-        image = Image.open(base_image_path)
-        draw = ImageDraw.Draw(image)
+    font_path = "fonts/Gotham-Medium.otf" 
+    font_size = 200
+    font = ImageFont.truetype(font_path, font_size)
+    rider_font = ImageFont.truetype(font_path, 130)
+    date_font = ImageFont.truetype(font_path, 65)
+    text_color = (255, 255, 255)
 
-        font_path = "fonts/Gotham-Medium.otf" 
-        font_size = 55
-        font = ImageFont.truetype(font_path, font_size)
-        date_font = ImageFont.truetype(font_path, 65)
-        text_color = (255, 255, 255)
+    data_metrics = {
+        "date": str(date_str),
+        "ridership": str(riders),
+        "averageheadway": f"{int(((route_performance(data)['total_true'].sum())/(route_performance(data)['total'].sum()))*100)}%"
+    }
 
-        data_metrics = {
-            "date": str(date_str),
-            "ridership": str(riders),
-            "averageheadway": str(round(abs(delay), 1))
-        }
+    # to center the date
+    img_width, img_height = image.size
+    date_text = data_metrics["date"]
+    text_bbox = date_font.getbbox(date_text)
+    text_width = text_bbox[2] - text_bbox[0]
+    centered_x = (img_width - text_width) // 2
+    date_position = (centered_x, 466.3)
 
-        # to center the date
-        img_width, img_height = image.size
-        date_text = data_metrics["date"]
-        text_bbox = date_font.getbbox(date_text)
-        text_width = text_bbox[2] - text_bbox[0]
-        centered_x = (img_width - text_width) // 2
-        date_position = (centered_x, 526.3)
+    # to center the ridership
+    img_width, img_height = image.size
+    rider_text = data_metrics["ridership"]
+    text_bbox = rider_font.getbbox(rider_text)
+    text_width = text_bbox[2] - text_bbox[0]
+    rider_centered_x = (img_width - text_width) // 2
 
-        orig_text_positions = {
-            "date": date_position,  # (x, y)
-            "ridership": (238, 715),
-            "averageheadway": (320, 787)
-        }
+    # to center the ontime percentage
+    img_width, img_height = image.size
+    avgheadway_text = data_metrics["averageheadway"]
+    text_bbox = font.getbbox(avgheadway_text)
+    text_width = text_bbox[2] - text_bbox[0]
+    avg_headway_x = (img_width - text_width) // 2
 
-        ridership_x = get_left_aligned_x(orig_text_positions["ridership"][0], data_metrics["ridership"], font)
-        avg_headway_x = get_left_aligned_x(orig_text_positions["averageheadway"][0], data_metrics["averageheadway"], font)
+    text_positions = {
+        "date": date_position,  # (x, y)
+        "ridership": (rider_centered_x, 885),
+        "averageheadway": (avg_headway_x, 550)
+    }
 
-        text_positions = {
-            "date": date_position,  # (x, y)
-            "ridership": (ridership_x, 715),
-            "averageheadway": (avg_headway_x, 787)
-        }
+    for key, text in data_metrics.items():
+        position = text_positions[key]
+        if key == "date":
+            draw.text(position, text, fill=text_color, font=date_font, align="center")
+        elif key == "ridership":
+            draw.text(position, text, fill=text_color, font=rider_font, align="center")
+        else:
+            draw.text(position, text, fill=text_color, font=font, align="center")
 
-        for key, text in data_metrics.items():
-            position = text_positions[key]
-            if key == "date":
-                draw.text(position, text, fill=text_color, font=date_font, align="center")
-            else:
-                draw.text(position, text, fill=text_color, font=font, align="center")
-    elif img_type == "bad":
-            base_image_path = "images/badtemplate.png"
-
-            image = Image.open(base_image_path)
-            draw = ImageDraw.Draw(image)
-
-            font_path = "fonts/Gotham-Medium.otf" 
-            font_size = 55
-            font = ImageFont.truetype(font_path, font_size)
-            date_font = ImageFont.truetype(font_path, 65)
-            text_color = (255, 255, 255)
-
-            data_metrics = {
-                "date": str(date_str),
-                "ridership": str(riders),
-                "averageheadway": str(round(abs(delay), 1))
-            }
-
-            # to center the date
-            img_width, img_height = image.size
-            date_text = data_metrics["date"]
-            text_bbox = date_font.getbbox(date_text)
-            text_width = text_bbox[2] - text_bbox[0]
-            centered_x = (img_width - text_width) // 2
-            date_position = (centered_x, 526.3)
-
-            orig_text_positions = {
-                "date": date_position,  # (x, y)
-                "ridership": (248, 715),
-                "averageheadway": (310, 787)
-            }
-
-            ridership_x = get_left_aligned_x(orig_text_positions["ridership"][0], data_metrics["ridership"], font)
-            avg_headway_x = get_left_aligned_x(orig_text_positions["averageheadway"][0], data_metrics["averageheadway"], font)
-
-            text_positions = {
-                "date": date_position,  # (x, y)
-                "ridership": (ridership_x, 715),
-                "averageheadway": (avg_headway_x, 787)
-            }
-
-            for key, text in data_metrics.items():
-                position = text_positions[key]
-                if key == "date":
-                    draw.text(position, text, fill=text_color, font=date_font, align="center")
-                else:
-                    draw.text(position, text, fill=text_color, font=font, align="center")
-    
     # save image locally
     image = image.convert("RGB")
     image.save(output_image_path)
@@ -467,123 +232,172 @@ def make_photo(img_type, riders, delay):
     with open(output_image_path, "rb") as file:
         data = file.read()
         base64_data = base64.b64encode(data)
-    
+
     response = requests.post(url, headers=headers, data={"image": base64_data})
     imgurl = response.json()["data"]["link"]
     print(f"Image uploaded at {imgurl}")
 
     return imgurl
 
-def generate_weekly_report():
-    """
-    Generates a status message using data from call_them_out() for the entire week.
-    """
-    # Retrieve metrics from call_them_out()
-    (daytime_ratio, nighttime_ratio,
-     delayed_daytime_routes, delayed_nighttime_routes,
-     average_delay, average_delay_daytime, average_delay_nighttime, total_ratio) = call_them_out(timetype='week')
-    
-    (dailyridership, total_ridership, day_mostridership, day_mostridershipval, 
-    day_leastridership, day_leastridershipval) = get_passengers(timetype='week')
+def get_caption(data, platform="BSKY"):
 
-    # Use yesterday's date for the output
+    # Calculate the busiest stop based on passengerLoad
+    stop_loads = data.groupby('stopName')['passengerLoad'].sum()
+    busiest_stop = stop_loads.idxmax()
+    busiest_stop_load = stop_loads.max()
+    headways = get_headways(data)
+    performance = route_performance(data)
+    ridership = get_ridership(data)
+
+    benchmark = 0.80
+
+    overall_rate = performance['total_true'].sum() / performance['total'].sum()
     yesterday = datetime.now() - timedelta(days=1)
     date_str = yesterday.strftime("%A, %B %d, %Y")
     
-    # Determine modifier for the UGoing? sentence: "not" if overall delay is positive
-    delay_modifier = "bad" if average_delay > 5 else "good"
+    # Message 1 contents
+    numberofruns = headways.shape[0]
+    ontimeruns = performance['total_true'].sum()
+    worst_route = performance.loc[(performance['total_true']/performance['total']).idxmin()]["routeName"]
+    best_route = performance.loc[(performance['total_true'] / performance['total']).idxmax()]["routeName"]
+    delay_modifier = "had troubles running" if overall_rate > 0 else "ran smoothly"
     
-    # Create overall delay description text
-    if average_delay > 5:
-        overall_delay_text = f"{round(average_delay, 1)} minutes behind guaranteed headways, if they weren't on the {int(total_ratio*100)}% of on-time shuttles"
-    elif average_delay < 0:
-        overall_delay_text = f"{round(abs(average_delay), 1)} minutes ahead of guaranteed headways, if they were on the {int(total_ratio*100)}% of on-time shuttles"
-    else:
-        overall_delay_text = f"roughly on par with guaranteed headways, {int(total_ratio*100)}% of shuttles were on-time time."
-    
-    # Begin constructing the message
-    message1 = (
-        f"🎉 Happy Friday! UGo had a {delay_modifier} week moving Maroons around. (week ending: {date_str}). "
-        f"This week students could expect to wait {overall_delay_text}.\n\nLearn more in the thread ⬇️"
-    )
+    if platform=="IG":
+        message = f"""UGo shuttle services {delay_modifier} yesterday on {date_str}. Out of {numberofruns} runs, {ontimeruns} were on time.
 
-    message2 = ""
-    message3 = ""
-    
-    # Format daytime information
-    daytime_pct = f"{round(daytime_ratio * 100, 1)}%"
-    message2 += f"☀️ This week, {daytime_pct} of daytime routes ran on time."
-    if delayed_daytime_routes and (average_delay_daytime is not None):
-        routes_str = ", ".join(delayed_daytime_routes)
-        message2 += f" The {routes_str} routes suffered delays averaging {round(average_delay_daytime, 1)} minutes."
-    #message2 += "\n"
-    
-    # Format nighttime information
-    nighttime_pct = f"{round(nighttime_ratio * 100, 1)}%"
-    message3 += f"🌙 This week, {nighttime_pct} of nighttime routes ran on time."
-    if delayed_nighttime_routes and (average_delay_nighttime is not None):
-        routes_str = ", ".join(delayed_nighttime_routes)
-        message3 += f" The {routes_str} routes suffered delays averaging {round(average_delay_nighttime, 1)} minutes."
-    
-    message4 = f"👫 This week, there were {total_ridership} tap-ins on UGo, averaging to about {int(total_ridership/7)} riders/day.\n\nThe busiest day was on {day_mostridership if day_mostridership != 'Friday' else f'last {day_mostridership}'} with {day_mostridershipval} riders.\nThe quietest day was {day_leastridership if day_mostridership != 'Friday' else f'last {day_leastridership}'} with {day_leastridershipval} riders."
-    
-    return message1, message2, message3, message4
+    👎 The worst route was {worst_route}, where {((performance['total_true']/performance['total']).min()*100):.2f}% of runs had acceptable headways.
+    👍 The best route was {best_route}, which had an on-time performance of {((performance['total_true']/performance['total']).max()*100):.2f}%.
 
-
-def generate_status_text():
+    🧍‍♂️ {ridership} Maroons rode the shuttles, and the busiest stop was {busiest_stop} with {busiest_stop_load} tap-ins.
     """
-    Generates a status message using data from call_them_out().
-    """
-    # Retrieve metrics from call_them_out()
-    (daytime_ratio, nighttime_ratio,
-     delayed_daytime_routes, delayed_nighttime_routes,
-     average_delay, average_delay_daytime, average_delay_nighttime, total_ratio) = call_them_out()
-    
-    (df_total_ridership, total_ridership, hour_mostridership, 
-    hour_mostridershipval) = get_passengers(timetype='day')
+        return message
 
-    # Use yesterday's date for the output
-    yesterday = datetime.now() - timedelta(days=1)
-    date_str = yesterday.strftime("%A, %B %d, %Y")
-    
-    # Determine modifier for the UGoing? sentence: "not" if overall delay is positive
-    delay_modifier = "probably didn't" if average_delay > 0 else "probably did"
-    
-    # Create overall delay description text
-    if average_delay > 0:
-        overall_delay_text = f"{round(average_delay, 1)} minutes longer than the guaranteed headways."
-        imgurl = make_photo(img_type="bad", riders=total_ridership, delay=average_delay)
-    elif average_delay < 0:
-        overall_delay_text = f"{round(abs(average_delay), 1)} minutes less than the guaranteed headways."
-        imgurl = make_photo(img_type="good", riders=total_ridership, delay=average_delay)
-    else:
-        overall_delay_text = "to the guaranteed headways"
-        imgurl = make_photo(img_type="good", riders=total_ridership, delay=average_delay)
-    
-    # Begin constructing the message
-    message1 = (
-        f"UGOing? {total_ridership} riders {delay_modifier} yesterday, {date_str}.\n\n"
-        f"UGo Shuttles overall ran on average {overall_delay_text}. Their busiest hour was {hour_mostridership} with {hour_mostridershipval} tap-ins.\n\nLearn more ⬇️"
-    )
+    if platform=="BSKY":
+        message1 = f"UGo shuttle services {delay_modifier} yesterday on {date_str}. Out of {numberofruns} runs, {ontimeruns} were on time."
+        message2 = f"👎 The worst route was {worst_route}, where only {((performance['total_true']/performance['total']).min()*100):.2f}% of the runs had acceptable headways.\n👍 The best route was {best_route}, which had an on-time performance of {((performance['total_true']/performance['total']).max()*100):.2f}%."
+        message3 = f"🧍‍♂️ {ridership} Maroons rode the shuttles, and the busiest stop was {busiest_stop} with {busiest_stop_load} tap-ins."
+        return message1, message2, message3
 
-    message2 = ""
-    message3 = ""
+def post(caption, platform=None, image=None):
+    if platform is None:
+        return ValueError("No platform specified!")
     
-    # Format daytime information
-    if daytime_ratio == 0:
-        message2 = f"Daytime routes did not run yesterday, {date_str}. Daytime shuttle routes run Monday through Friday"
-    else:
-        daytime_pct = f"{round(daytime_ratio * 100, 1)}%"
-        message2 = f"☀️ During the day, {daytime_pct} of daytime routes ran on time."
-        if delayed_daytime_routes and (average_delay_daytime is not None):
-            routes_str = ", ".join(delayed_daytime_routes)
-            message2 += f" The {routes_str} routes suffered delays averaging {round(average_delay_daytime, 1)} minutes."
+    BSKY_USERNAME = "bsky.uchicagoshuttles.com"
+    BSKY_PASSWORD = os.getenv("BSKY_PASSWORD")
+    safecaption = caption[:300]
+
+    if platform=="BSKY":
+        client = Client()
+        client.login(BSKY_USERNAME, BSKY_PASSWORD)
+
+        message1, message2, message3 = caption
+
+        if image is not None:
+            with open('images/generated_image.jpg', 'rb') as f:
+                img_data = f.read()
+
+                response1 = client.send_image(text=message1, image=img_data, image_alt='Status image')
+                root_ref = models.create_strong_ref(response1)
+                print("Posted thread 1/3 with image!")
+
+                response2 = client.send_post(message2,
+                    reply_to=models.AppBskyFeedPost.ReplyRef(
+                        parent=models.create_strong_ref(response1),
+                        root=root_ref))
+                print("Posted thread 2/3!")
+
+                response2 = client.send_post(message3,
+                    reply_to=models.AppBskyFeedPost.ReplyRef(
+                        parent=models.create_strong_ref(response2),
+                        root=root_ref))
+                print("Posted thread 3/3!")
+
+        if image is None:
+            client.send_post(caption)
+            print("Posted without image")
+        
+    if platform=="IG":
+        INSTAGRAM_ACCOUNT_ID = os.getenv("INSTAGRAM_ACCOUNT_ID")
+        ACCESS_TOKEN = os.getenv("ACCESS_TOKEN")
+        INSTAGRAM_GRAPH_API = "https://graph.instagram.com/v22.0"
+
+        url = f"{INSTAGRAM_GRAPH_API}/{INSTAGRAM_ACCOUNT_ID}/media"
+        payload = {
+            "caption": caption,
+            "access_token": ACCESS_TOKEN,
+            "media_type": "IMAGE",
+            "image_url": image
+        }
+
+        response = requests.post(url, data=payload)
+
+        if response.status_code == 200:
+            media_id = response.json().get("id")
+            print(f"Image uploaded successfully! Media ID: {media_id}")
+
+            publish_url = f"{INSTAGRAM_GRAPH_API}/{INSTAGRAM_ACCOUNT_ID}/media_publish"
+            publish_payload = {
+                "creation_id": media_id,
+                "access_token": ACCESS_TOKEN,
+            }
+            publish_response = requests.post(publish_url, data=publish_payload)
+
+            if publish_response.status_code == 200:
+                print("Post published successfully!")
+            else:
+                print(f"Publishing failed: {publish_response.json()}")
+        else:
+            print(f"Upload failed: {response.json()}")
+
+def bad_or_good(data):
+    performance = route_performance(data)
+    benchmark = 0.80
+    overall_rate = performance['total_true'].sum() / performance['total'].sum()
+    status = "bad" if overall_rate < benchmark else "good"
+    return status
+
+def wait_until_post_time(desiredtime="8:00"):
+    tz = pytz.timezone("America/Chicago")
+    now = datetime.now(tz)
     
-    # Format nighttime information
-    nighttime_pct = f"{round(nighttime_ratio * 100, 1)}%"
-    message3 += f"🌙 During the night, {nighttime_pct} of nighttime routes ran on time."
-    if delayed_nighttime_routes and (average_delay_nighttime is not None):
-        routes_str = ", ".join(delayed_nighttime_routes)
-        message3 += f" The {routes_str} routes suffered delays averaging {round(average_delay_nighttime, 1)} minutes."
+    hour = int(desiredtime.split(":")[0])
+    minute = int(desiredtime.split(":")[1])
     
-    return message1, message2, message3, imgurl
+    post_time = now.replace(hour=hour, minute=minute, second=0, microsecond=0)
+    if now >= post_time:
+        # If it's already past 8 AM today, wait until tomorrow
+        post_time += timedelta(days=1)
+    sleep_seconds = (post_time - now).total_seconds()
+    print(f"Sleeping for {sleep_seconds/3600:.2f} hours until {desiredtime} CST")
+    time_module.sleep(sleep_seconds)
+
+def runbot(platform="BSKY"):
+    # Determine yesterday's date in US/Central time
+    central_tz = pytz.timezone('US/Central')
+    now_central = datetime.now(central_tz)
+    yesterday_date = now_central.date() - timedelta(days=1)
+
+    # Create naive datetime objects for the start and end of yesterday in US/Central time
+    start_central_naive = datetime.combine(yesterday_date, time(0, 0, 0))
+    end_central_naive   = datetime.combine(yesterday_date, time(23, 59, 59))
+
+    # Localize these naive times to US/Central to get timezone-aware objects
+    start_central = central_tz.localize(start_central_naive)
+    end_central   = central_tz.localize(end_central_naive)
+
+    # Convert the US/Central times to UTC for use in UTC-based filtering
+    start_utc = start_central.astimezone(pytz.utc)
+    end_utc   = end_central.astimezone(pytz.utc)
+
+    # Format the UTC datetimes as strings if needed
+    start = start_utc.strftime("%Y-%m-%d %H:%M:%S")
+    end = end_utc.strftime("%Y-%m-%d %H:%M:%S")
+
+    url = f"/api/getStops?start={start}&end={end}"
+    data = getApiData(url, API_KEY)
+
+    caption = get_caption(data=data, platform=platform)
+    status = bad_or_good(data)
+    img = make_photo(data=data, img_type=status)
+
+    post(caption, platform=platform, image=img)

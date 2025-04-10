@@ -2,3 +2,5 @@ secret.py
 test.py
 __pycache__/
 session.json
+test.ipynb
+.env
