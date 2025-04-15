@@ -97,11 +97,19 @@ def get_headways(data, start=None, end=None):
         if route_id == 48618 or route_name == 'Red Line/Arts Block':
             return 20
         elif route_id == 38732 or route_name == '53rd Street Express':
-            return 30
+            if row['arrivalTime'].time() >= time(8, 0) or row['arrivalTime'].time() < time(10, 30):
+                # if between 8am and 10:30am, 10 minutes
+                return 15
+            else:
+                30
         elif route_id == 38729 or route_name == 'Apostolic':
-            return 30
+            return 10
         elif route_id == 38730 or route_name == 'Apostolic/Drexel':
-            return 15
+            if row['arrivalTime'].time() >= time(15, 0) or row['arrivalTime'].time() < time(0, 30):
+                # if between 3pm and 12:30am, 10 minutes
+                return 10
+            else:
+                return 15
         elif route_id == 38728 or route_name == 'Drexel':
             return 10
         elif route_id == 50198 or route_id == 50199 or route_name == 'Downtown Campus Connector':
@@ -113,13 +121,29 @@ def get_headways(data, start=None, end=None):
 
         # Nighttime routes
         elif route_id == 38734 or route_name == 'North':
-            return 30
+            if row['arrivalTime'].time() >= time(23, 0) or row['arrivalTime'].time() < time(4, 00):
+                # between 11pm and 4am, 30 minutes
+                return 30
+            else:
+                return 25
         elif route_id == 38735 or route_name == 'South':
-            return 30
+            if row['arrivalTime'].time() >= time(23, 0) or row['arrivalTime'].time() < time(4, 00):
+                # between 11pm and 4am, 30 minutes
+                return 30
+            else:
+                return 25
         elif route_id == 38736 or route_name == 'East':
-            return 30
+            if row['arrivalTime'].time() >= time(23, 0) or row['arrivalTime'].time() < time(4, 00):
+                # between 11pm and 4am, 30 minutes
+                return 30
+            else:
+                return 25
         elif route_id == 38737 or route_name == 'Central':
-            return 30
+            if row['arrivalTime'].time() >= time(23, 0) or row['arrivalTime'].time() < time(4, 00):
+                # between 11pm and 4am, 30 minutes
+                return 30
+            else:
+                return 25
         elif route_id == 40515 or route_name == 'Regents Express':
             return 30
         elif route_name == 'South Loop Shuttle':
@@ -127,15 +151,34 @@ def get_headways(data, start=None, end=None):
         else:
             return np.nan
 
+
     # Records whether that specific run met the promised headway
     df_stops["promised_headway"] = df_stops.apply(get_promised_headway, axis=1)
-    df_stops["meetPromisedHeadway"] = df_stops.apply(
-        lambda row: abs(row["headway"] - row["promised_headway"]) <= 5 if pd.notnull(row["promised_headway"]) else False,
-        axis=1
-    )
+
+    def check_headway(row):
+        night_route = ["North", "South", "East", "Central"]
+        night_route_id = [38734, 38735, 38736, 38737]
+
+        if pd.isnull(row["promised_headway"]):
+            return False
+
+        # if the route is in the night route list, check if the headway is between 10 and 30 minutes (+/- the range of 15-25 min)
+        if row["routeName"] in night_route or row["routeId"] in night_route_id:
+            return 10 <= row["headway"] <= 30
+
+        # if the route is the red line arts block, check if the headway is between 5 and 25 minutes (+/- the range of 10-20 min)
+        if row["routeName"] == "Red Line/Arts Block" or row["routeId"] == 48618:
+            return 5 <= row["headway"] <= 25
+
+        else:
+            # for non-special routes, if the measured headway is within 5 minutes (above or below) the promised headway.
+            return abs(row["headway"] - row["promised_headway"]) <= 5
+
+    df_stops["meetPromisedHeadway"] = df_stops.apply(check_headway, axis=1)
     
     # Other data cleaning (dropping irrelevant columns)
     df_stops = df_stops.drop(columns=["id","stopDurationSeconds", "arrivalTime", "departureTime","nextStopId"])
+
     return df_stops
 
 
