@@ -15,7 +15,7 @@ load_dotenv()
 
 API_KEY = os.getenv("API_KEY")
 IMGUR_CLIENT_ID = os.getenv("IMGUR_CLIENT_ID")
-BASE_URL = "https://uchicagoshuttles.com"
+BASE_URL = "https://www.uchicagoshuttles.com"
 
 def getApiData(url, key):
     """
