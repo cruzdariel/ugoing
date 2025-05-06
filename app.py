@@ -1,7 +1,7 @@
 from util import *
 import time as time_module
 
-ASAP = True
+ASAP = False
 ASAPplatform = None
 
 if __name__ == "__main__":
