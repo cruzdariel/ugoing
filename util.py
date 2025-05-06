@@ -19,18 +19,30 @@ BASE_URL = "https://www.uchicagoshuttles.com"
 
 def getApiData(url, key):
     """
-    Makes the API request and returns a Pandas dataframe
+    Makes the API request and returns a Pandas DataFrame with
+    arrivalTime and departureTime converted into naive US/Central datetimes.
     """
     headers = {
-        "key":API_KEY,
+        "key": key,
         "User-Agent": "curl",
     }
     
-    response = requests.request("GET", BASE_URL+url, headers=headers)
-    if response.status_code == 200:
-        return(pd.read_csv(io.StringIO(response.text)))
-    else:
+    response = requests.get(BASE_URL + url, headers=headers)
+    if response.status_code != 200:
         raise ValueError(f"ERROR making the API request: {response.text}")
+    
+    # 1) Read CSV into DataFrame
+    df = pd.read_csv(io.StringIO(response.text))
+    
+    # 2) Parse/convert timestamps
+    for col in ["arrivalTime", "departureTime"]:
+        df[col] = (
+            pd.to_datetime(df[col], utc=True)      # interpret as UTC
+              .dt.tz_convert("US/Central")         # shift to Central
+              .dt.tz_localize(None)                # drop tzinfo → naive
+        )
+    
+    return df
 
 def utcToCentral(datetime_utc):
     """
@@ -41,7 +53,7 @@ def utcToCentral(datetime_utc):
     datetime_central = datetime_central.replace(tzinfo=None)
     return datetime_central
 
-def get_headways(data, start=None, end=None):
+def get_headways(data):
     """
     Returns the average headway for each route between the start and end time
 
@@ -51,14 +63,6 @@ def get_headways(data, start=None, end=None):
     # Get the stops data
     df_stops = data
 
-    # Convert the times to datetime objects
-    df_stops["arrivalTime"] = pd.to_datetime(df_stops["arrivalTime"])
-    df_stops["departureTime"] = pd.to_datetime(df_stops["departureTime"])
-
-    # Convert the times to US/Central
-    df_stops["arrivalTime"] = df_stops["arrivalTime"].apply(lambda x: utcToCentral(x))
-    df_stops["departureTime"] = df_stops["departureTime"].apply(lambda x: utcToCentral(x))
-    
     # Compute the Headway
     current_id = df_stops.index[0]
     last_id = df_stops.index[-1]
@@ -97,11 +101,11 @@ def get_headways(data, start=None, end=None):
         if route_id == 48618 or route_name == 'Red Line/Arts Block':
             return 20
         elif route_id == 38732 or route_name == '53rd Street Express':
-            if row['arrivalTime'].time() >= time(8, 0) or row['arrivalTime'].time() < time(10, 30):
-                # if between 8am and 10:30am, 10 minutes
+            if row['arrivalTime'].time() >= time(8, 0) and row['arrivalTime'].time() < time(10, 30):
+                # if between 8am and 10:30am, 15 minutes
                 return 15
             else:
-                30
+                return 30
         elif route_id == 38729 or route_name == 'Apostolic':
             return 10
         elif route_id == 38730 or route_name == 'Apostolic/Drexel':
@@ -115,7 +119,7 @@ def get_headways(data, start=None, end=None):
         elif route_id == 50198 or route_id == 50199 or route_name == 'Downtown Campus Connector':
             return 20
         elif route_id == 38731 or route_id == 38809 or route_name == 'Midway Metra':
-            return 30
+            return 10
         elif route_name == 'Friend Center/Metra':
             return 30
 
@@ -156,31 +160,34 @@ def get_headways(data, start=None, end=None):
     df_stops["promised_headway"] = df_stops.apply(get_promised_headway, axis=1)
 
     def check_headway(row):
-        night_route = ["North", "South", "East", "Central"]
-        night_route_id = [38734, 38735, 38736, 38737]
+        night_route = {"North", "South", "East", "Central"}
+        night_route_id = {38734, 38735, 38736, 38737}
 
+        # No promised headway → can’t judge
         if pd.isnull(row["promised_headway"]):
             return False
 
-        # if the route is in the night route list, check if the headway is between 10 and 30 minutes (+/- the range of 15-25 min)
-        if row["routeName"] in night_route or row["routeId"] in night_route_id:
-            return 10 <= row["headway"] <= 30
+        t = row["headway"]
 
-        # if the route is the red line arts block, check if the headway is between 5 and 25 minutes (+/- the range of 10-20 min)
-        if row["routeName"] == "Red Line/Arts Block" or row["routeId"] == 48618:
-            return 5 <= row["headway"] <= 25
+        # Special night‐route window (still ±range around 15–25)
+        #if row["routeName"] in night_route or row["routeId"] in night_route_id:
+        #   return 10 <= t <= 30
 
-        else:
-            # for non-special routes, if the measured headway is within 5 minutes (above or below) the promised headway.
-            return abs(row["headway"] - row["promised_headway"]) <= 5
+        # Special Red Line/Arts Block window
+        #if row["routeName"] == "Red Line/Arts Block" or row["routeId"] == 48618:
+        #    return 5 <= t <= 25
+
+        # For everything else: only fail if you’re more than 5 min _late_.
+        # i.e. allow any early headways, and anything up to (promised + 5).
+        return t <= row["promised_headway"] + 5
 
     df_stops["meetPromisedHeadway"] = df_stops.apply(check_headway, axis=1)
     
     # Other data cleaning (dropping irrelevant columns)
     df_stops = df_stops.drop(columns=["id","stopDurationSeconds", "arrivalTime", "departureTime","nextStopId"])
+    df_stops = df_stops.dropna(subset=["promised_headway"])
 
     return df_stops
-
 
 def route_performance(data):
     """

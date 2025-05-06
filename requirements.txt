@@ -1,0 +1,7 @@
+numpy
+pandas
+requests
+pytz
+Pillow
+atproto
+python-dotenv
