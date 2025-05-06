@@ -1,8 +1,8 @@
 from util import *
 import time as time_module
 
-ASAP = True
-ASAPplatform = "IG"
+ASAP = False
+ASAPplatform = None
 
 if __name__ == "__main__":
     while True:

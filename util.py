@@ -310,7 +310,7 @@ def get_caption(data, platform="BSKY"):
     ontimeruns = performance['total_true'].sum()
     worst_route = performance.loc[(performance['total_true']/performance['total']).idxmin()]["routeName"]
     best_route = performance.loc[(performance['total_true'] / performance['total']).idxmax()]["routeName"]
-    delay_modifier = "had troubles running" if overall_rate > 0 else "ran smoothly"
+    delay_modifier = "had troubles running" if overall_rate > 0.8 else "ran smoothly"
     
     if platform=="IG":
         message = f"""UGo shuttle services {delay_modifier} yesterday on {date_str}. Out of {numberofruns} runs, {ontimeruns} were on time.
